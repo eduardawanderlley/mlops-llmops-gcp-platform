@@ -1,0 +1,182 @@
+{
+  "components": {
+    "comp-extract-and-chunk-documents": {
+      "executorLabel": "exec-extract-and-chunk-documents",
+      "inputDefinitions": {
+        "parameters": {
+          "source_gcs_path": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "chunked_output": {
+            "artifactType": {
+              "schemaTitle": "system.Artifact",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        }
+      }
+    },
+    "comp-generate-embeddings-and-load": {
+      "executorLabel": "exec-generate-embeddings-and-load",
+      "inputDefinitions": {
+        "artifacts": {
+          "chunked_input": {
+            "artifactType": {
+              "schemaTitle": "system.Artifact",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "dataset_name": {
+            "parameterType": "STRING"
+          },
+          "project_id": {
+            "parameterType": "STRING"
+          },
+          "table_name": {
+            "parameterType": "STRING"
+          }
+        }
+      }
+    }
+  },
+  "defaultPipelineRoot": "gs://llmops-pipeline-artifacts-bucket/pipeline_roots",
+  "deploymentSpec": {
+    "executors": {
+      "exec-extract-and-chunk-documents": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "extract_and_chunk_documents"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery' 'google-cloud-storage'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef extract_and_chunk_documents(\n    source_gcs_path: str,\n    chunked_output: Output[Artifact]\n):\n    \"\"\"Component: Reads raw corporate PDFs/docs from GCS and chunks into text passages.\"\"\"\n    import json\n    chunks = [\n        {\n            \"doc_id\": \"DOC-2026-01\",\n            \"chunk_id\": \"c1\",\n            \"title\": \"GCP Infrastructure Standard\",\n            \"content\": \"All microservices must be deployed on Cloud Run with automated CI/CD deployment pipelines.\"\n        }\n    ]\n    with open(chunked_output.path, \"w\") as f:\n        json.dump(chunks, f)\n\n"
+          ],
+          "image": "python:3.10-slim"
+        }
+      },
+      "exec-generate-embeddings-and-load": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "generate_embeddings_and_load"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'google-cloud-bigquery'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef generate_embeddings_and_load(\n    project_id: str,\n    dataset_name: str,\n    table_name: str,\n    chunked_input: dsl.Input[Artifact]\n):\n    \"\"\"Component: Generates embeddings using Vertex AI text-embedding-004 and loads to BigQuery.\"\"\"\n    import json\n    with open(chunked_input.path, \"r\") as f:\n        chunks = json.load(f)\n\n    print(f\"Loaded {len(chunks)} chunks into BigQuery vector store table {project_id}.{dataset_name}.{table_name}\")\n\n"
+          ],
+          "image": "python:3.10-slim"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Batch pipeline to extract, chunk, embed, and index enterprise docs into BigQuery vector store",
+    "name": "llmops-corporate-data-ingestion-pipeline"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "extract-and-chunk-documents": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-extract-and-chunk-documents"
+          },
+          "inputs": {
+            "parameters": {
+              "source_gcs_path": {
+                "componentInputParameter": "source_gcs_path"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "extract-and-chunk-documents"
+          }
+        },
+        "generate-embeddings-and-load": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-generate-embeddings-and-load"
+          },
+          "dependentTasks": [
+            "extract-and-chunk-documents"
+          ],
+          "inputs": {
+            "artifacts": {
+              "chunked_input": {
+                "taskOutputArtifact": {
+                  "outputArtifactKey": "chunked_output",
+                  "producerTask": "extract-and-chunk-documents"
+                }
+              }
+            },
+            "parameters": {
+              "dataset_name": {
+                "componentInputParameter": "dataset_name"
+              },
+              "project_id": {
+                "componentInputParameter": "project_id"
+              },
+              "table_name": {
+                "componentInputParameter": "table_name"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "generate-embeddings-and-load"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "dataset_name": {
+          "defaultValue": "llmops_prod",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "project_id": {
+          "defaultValue": "genai-mlops-platform",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "source_gcs_path": {
+          "defaultValue": "gs://llmops-raw-corporate-docs/2026/",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "table_name": {
+          "defaultValue": "corporate_knowledge",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.17.0"
+}

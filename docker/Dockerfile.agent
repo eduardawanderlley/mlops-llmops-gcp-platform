@@ -1,0 +1,47 @@
+
+# Multi-stage Build
+FROM python:3.10-slim AS builder
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Instala apenas as dependências de compilação necessárias
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instala as dependências Python isoladamente no ambiente do builder
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+
+# Imagem de Execução (Runtime)
+FROM python:3.10-slim AS runner
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/install/bin:${PATH}" \
+    PYTHONPATH="/app:${PYTHONPATH}"
+
+# Cria usuário não-root para execução segura no Cloud Run / GKE
+RUN useradd -m -u 1000 appuser
+
+# Copia dependências compiladas do estágio builder
+COPY --from=builder /install /install
+
+# Copia os fontes da aplicação
+COPY src/ /app/src/
+COPY sql/ /app/sql/
+
+# Define permissões de execução para o usuário seguro
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8080
+
+CMD ["uvicorn", "src.api.main:app", "--host", "0.0.0.0", "--port", "8080"]

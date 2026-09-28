@@ -1,0 +1,44 @@
+# Multi-stage Build
+FROM python:3.10-slim AS builder
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Instala apenas os pacotes de sistema necessários para compilação
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instala dependências Python isoladamente no diretório de instalação
+COPY requirements.txt .
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Imagem de Execução do Servidor MCP (Runtime)
+FROM python:3.10-slim AS runner
+
+WORKDIR /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/install/bin:${PATH}" \
+    PYTHONPATH="/app:${PYTHONPATH}"
+
+# Cria usuário não-root para segurança na execução do contêiner
+RUN useradd -m -u 1000 appuser
+
+# Copia dependências compiladas do estágio builder
+COPY --from=builder /install /install
+
+# Copia o código-fonte do servidor MCP
+COPY src/ /app/src/
+
+# Aplica permissões de acesso ao usuário não-root
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8088
+
+CMD ["uvicorn", "src.mcp.mcp_server:mcp_app", "--host", "0.0.0.0", "--port", "8088"]

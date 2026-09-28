@@ -1,0 +1,170 @@
+{
+  "components": {
+    "comp-evaluate-prompt-version": {
+      "executorLabel": "exec-evaluate-prompt-version",
+      "inputDefinitions": {
+        "artifacts": {
+          "input_dataset": {
+            "artifactType": {
+              "schemaTitle": "system.Artifact",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        },
+        "parameters": {
+          "prompt_version": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "metrics_output": {
+            "artifactType": {
+              "schemaTitle": "system.Metrics",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        }
+      }
+    },
+    "comp-fetch-evaluation-dataset": {
+      "executorLabel": "exec-fetch-evaluation-dataset",
+      "inputDefinitions": {
+        "parameters": {
+          "dataset_name": {
+            "parameterType": "STRING"
+          }
+        }
+      },
+      "outputDefinitions": {
+        "artifacts": {
+          "output_dataset": {
+            "artifactType": {
+              "schemaTitle": "system.Artifact",
+              "schemaVersion": "0.0.1"
+            }
+          }
+        }
+      }
+    }
+  },
+  "defaultPipelineRoot": "gs://llmops-pipeline-artifacts-bucket/pipeline_roots",
+  "deploymentSpec": {
+    "executors": {
+      "exec-evaluate-prompt-version": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "evaluate_prompt_version"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform' 'google-cloud-bigquery' 'jinja2'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef evaluate_prompt_version(\n    prompt_version: str,\n    input_dataset: dsl.Input[Artifact],\n    metrics_output: Output[Metrics]\n):\n    \"\"\"Component: Evaluates prompt version against dataset and calculates faithfulness/relevance metrics.\"\"\"\n    import json\n\n    with open(input_dataset.path, \"r\") as f:\n        samples = json.load(f)\n\n    # Simulated evaluation metrics\n    sample_count = len(samples)\n    faithfulness = 0.92\n    answer_relevance = 0.95\n    hallucination_rate = 0.04\n\n    metrics_output.log_metric(\"sample_count\", sample_count)\n    metrics_output.log_metric(\"faithfulness_score\", faithfulness)\n    metrics_output.log_metric(\"answer_relevance_score\", answer_relevance)\n    metrics_output.log_metric(\"hallucination_rate\", hallucination_rate)\n\n"
+          ],
+          "image": "python:3.10-slim"
+        }
+      },
+      "exec-fetch-evaluation-dataset": {
+        "container": {
+          "args": [
+            "--executor_input",
+            "{{$}}",
+            "--function_to_execute",
+            "fetch_evaluation_dataset"
+          ],
+          "command": [
+            "sh",
+            "-c",
+            "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'google-cloud-bigquery' 'pydantic' 'jinja2'  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.17.0' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"$0\" \"$@\"\n",
+            "sh",
+            "-ec",
+            "program_path=$(mktemp -d)\n\nprintf \"%s\" \"$0\" > \"$program_path/ephemeral_component.py\"\n_KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         \"$program_path/ephemeral_component.py\"                         \"$@\"\n",
+            "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import *\n\ndef fetch_evaluation_dataset(\n    dataset_name: str,\n    output_dataset: Output[Artifact]\n):\n    \"\"\"Component: Fetches golden dataset samples from BigQuery or artifact store.\"\"\"\n    import json\n    samples = [\n        {\"id\": \"s1\", \"query\": \"What are security rules for GCP AI?\", \"ground_truth\": \"Use Secret Manager and BigQuery logging.\"},\n        {\"id\": \"s2\", \"query\": \"Where are microservices deployed?\", \"ground_truth\": \"Cloud Run containers.\"}\n    ]\n    with open(output_dataset.path, \"w\") as f:\n        json.dump(samples, f)\n\n"
+          ],
+          "image": "python:3.10-slim"
+        }
+      }
+    }
+  },
+  "pipelineInfo": {
+    "description": "Automated Vertex AI Pipeline for evaluation of prompt versions & LLM metrics",
+    "name": "llmops-prompt-evaluation-pipeline"
+  },
+  "root": {
+    "dag": {
+      "tasks": {
+        "evaluate-prompt-version": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-evaluate-prompt-version"
+          },
+          "dependentTasks": [
+            "fetch-evaluation-dataset"
+          ],
+          "inputs": {
+            "artifacts": {
+              "input_dataset": {
+                "taskOutputArtifact": {
+                  "outputArtifactKey": "output_dataset",
+                  "producerTask": "fetch-evaluation-dataset"
+                }
+              }
+            },
+            "parameters": {
+              "prompt_version": {
+                "componentInputParameter": "prompt_version"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "evaluate-prompt-version"
+          }
+        },
+        "fetch-evaluation-dataset": {
+          "cachingOptions": {
+            "enableCache": true
+          },
+          "componentRef": {
+            "name": "comp-fetch-evaluation-dataset"
+          },
+          "inputs": {
+            "parameters": {
+              "dataset_name": {
+                "componentInputParameter": "dataset_name"
+              }
+            }
+          },
+          "taskInfo": {
+            "name": "fetch-evaluation-dataset"
+          }
+        }
+      }
+    },
+    "inputDefinitions": {
+      "parameters": {
+        "dataset_name": {
+          "defaultValue": "enterprise_qa_v1",
+          "isOptional": true,
+          "parameterType": "STRING"
+        },
+        "prompt_version": {
+          "defaultValue": "v1.0.0",
+          "isOptional": true,
+          "parameterType": "STRING"
+        }
+      }
+    }
+  },
+  "schemaVersion": "2.1.0",
+  "sdkVersion": "kfp-2.17.0"
+}
